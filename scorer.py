@@ -1,4 +1,5 @@
 # scorer.py — pure viability scorer. score(text, source_type) -> [0.0, 1.0].
+# mongodb/scorer.py
 import re
 
 SOURCE_PRIORS = {

@@ -1,3 +1,4 @@
+# mongodb/api/fireworks_client.py
 """Minimal Fireworks streaming client for the gateway."""
 
 from __future__ import annotations
@@ -10,6 +11,7 @@ from typing import Any
 
 FIREWORKS_URL = "https://api.fireworks.ai/inference/v1/chat/completions"
 DEFAULT_MODEL = "accounts/fireworks/models/gpt-oss-20b"
+MAX_TOKENS = 700  # reasoning model: needs headroom for chain-of-thought + answer
 
 
 class FireworksClient:
@@ -23,7 +25,7 @@ class FireworksClient:
             "model": model,
             "messages": [{"role": "user", "content": prompt}],
             "stream": True,
-            "max_tokens": 160,
+            "max_tokens": MAX_TOKENS,
             "temperature": 0,
             "prompt_cache_key": cache_key,
             "perf_metrics_in_response": True,

@@ -1,3 +1,4 @@
+# mongodb/gate1_mongo.py
 import os
 from pymongo import MongoClient, ASCENDING
 from dotenv import load_dotenv
