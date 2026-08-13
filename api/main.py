@@ -8,7 +8,7 @@ import time
 import urllib.error
 from collections.abc import Iterator
 from dataclasses import asdict, dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any, Protocol
 
 from dotenv import load_dotenv
@@ -122,7 +122,7 @@ class TurnService:
             "model": self.model,
             "prompt_cache_key": cache_key,
             **asdict(metrics),
-            "created_at": datetime.now(UTC),
+            "created_at": datetime.now(timezone.utc),
         }
         self.metrics_writer.write(document)
         public_metrics = {
