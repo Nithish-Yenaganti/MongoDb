@@ -5,7 +5,7 @@ from pymongo import MongoClient, ASCENDING
 from scenario import SCENARIO 
 
 load_dotenv()
-db = MongoClient(os.environ["MongoDB_URI"])["radixmind"]
+db = MongoClient(os.environ["MONGODB_URI"])["radixmind"]
 
 turns = {t["turn"]: t for t in SCENARIO["turns"]}
 

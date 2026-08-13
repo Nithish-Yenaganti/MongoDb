@@ -95,7 +95,7 @@ class TurnService:
                     "source_type": request.chunk.source_type,
                     "score": item_score,
                     "status": "pinned" if admitted else "archived",
-                    "updated_at": datetime.now(UTC),
+                    "updated_at": datetime.now(timezone.utc),
                 }
             )
         else:

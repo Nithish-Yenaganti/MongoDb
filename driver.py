@@ -1,4 +1,4 @@
-import json, os, requests
+import json, os, httpx
 from dotenv import load_dotenv
 from pymongo import MongoClient
 from scenario import SCENARIO
@@ -12,9 +12,9 @@ INTERIM_QUESTION = "Note in one sentence what this evidence adds to the investig
 
 def run_turn(payload):
     answer_parts, metrics, event = [], None, None
-    with requests.post(GATEWAY, json=payload, stream=True, timeout=180) as r:
+    with httpx.stream("POST", GATEWAY, json=payload, timeout=180) as r:
         r.raise_for_status()
-        for raw in r.iter_lines(decode_unicode=True):
+        for raw in r.iter_lines():
             if not raw:
                 continue
             if raw.startswith("event:"):
