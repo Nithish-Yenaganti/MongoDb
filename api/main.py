@@ -6,6 +6,7 @@ import json
 import os
 import time
 import urllib.error
+from hashlib import sha256
 from collections.abc import Iterator
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -19,7 +20,7 @@ from api.fireworks_client import DEFAULT_MODEL, FireworksClient
 from api.metrics import MongoMetricsWriter
 from api.models import Mode, TurnRequest
 from api.prompt_compiler import EpisodeMemory, MemorySegment, compile_prompt
-from api.scoring import score
+from api.scoring import PIN_THRESHOLD, score
 
 
 class FireworksStream(Protocol):
@@ -30,6 +31,8 @@ class FireworksStream(Protocol):
 
 class MetricsWriter(Protocol):
     def write(self, document: dict[str, Any]) -> None: ...
+
+    def write_context(self, document: dict[str, Any]) -> None: ...
 
 
 @dataclass
@@ -62,7 +65,6 @@ class TurnService:
 
     def run(self, request: TurnRequest) -> Iterator[str]:
         item_score = score(request.chunk.text, request.chunk.source_type)
-        admitted = request.mode is Mode.baseline or item_score >= 0.5
         segment = MemorySegment(
             turn=request.turn,
             source_type=request.chunk.source_type,
@@ -70,16 +72,41 @@ class TurnService:
             score=item_score,
         )
 
-        if admitted:
+        if request.mode is Mode.radixmind:
+            try:
+                if item_score >= PIN_THRESHOLD:
+                    admitted, segments = self.memory.append_if_fits(
+                        request.episode_id, request.mode, segment
+                    )
+                else:
+                    admitted = False
+                    segments = self.memory.snapshot(request.episode_id, request.mode)
+            except ValueError as error:
+                yield self._sse("error", {"detail": str(error)})
+                return
+
+            self.metrics_writer.write_context(
+                {
+                    "content_hash": sha256(
+                        request.chunk.text.encode("utf-8")
+                    ).hexdigest(),
+                    "episode_id": request.episode_id,
+                    "turn": request.turn,
+                    "source_type": request.chunk.source_type,
+                    "score": item_score,
+                    "status": "pinned" if admitted else "archived",
+                    "updated_at": datetime.now(UTC),
+                }
+            )
+        else:
+            admitted = True
             try:
                 segments = self.memory.append(request.episode_id, request.mode, segment)
             except ValueError as error:
                 yield self._sse("error", {"detail": str(error)})
                 return
-        else:
-            segments = self.memory.snapshot(request.episode_id, request.mode)
 
-        prompt = compile_prompt(segments, request.question)
+        prompt = compile_prompt(segments, request.question, request.mode)
         cache_key = f"{request.episode_id}:{request.mode.value}"
         metrics = TurnMetrics()
         started = time.perf_counter()

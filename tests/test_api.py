@@ -6,8 +6,8 @@ import unittest
 from fastapi.testclient import TestClient
 
 from api.main import TurnRequest, TurnService, create_app
-from api.prompt_compiler import EpisodeMemory
-from api.scoring import score
+from api.prompt_compiler import EpisodeMemory, SEGMENT_B_TOKEN_BUDGET
+from api.scoring import PIN_THRESHOLD, score
 
 
 class FakeFireworks:
@@ -29,9 +29,13 @@ class FakeFireworks:
 class FakeMetrics:
     def __init__(self) -> None:
         self.documents = []
+        self.context_documents = []
 
     def write(self, document):
         self.documents.append(dict(document))
+
+    def write_context(self, document):
+        self.context_documents.append(dict(document))
 
 
 class GatewayTests(unittest.TestCase):
@@ -54,8 +58,11 @@ class GatewayTests(unittest.TestCase):
             "question": "What is wrong?",
         }
 
-    def test_score_is_phase_one_stub(self):
-        self.assertEqual(score("anything", "logs"), 0.5)
+    def test_real_scorer_prefers_runbook_to_log_dump(self):
+        runbook_score = score("Follow this recovery procedure.", "runbook")
+        log_score = score("2026-08-13T13:01:02Z rid=deadbeef", "log_dump")
+        self.assertGreaterEqual(runbook_score, PIN_THRESHOLD)
+        self.assertLess(log_score, PIN_THRESHOLD)
 
     def test_post_turn_streams_and_writes_one_metrics_document(self):
         client = TestClient(create_app(self.service))
@@ -79,6 +86,12 @@ class GatewayTests(unittest.TestCase):
             client.post("/turn", json=self.request("radixmind")).status_code, 200
         )
         self.assertEqual(len(self.metrics.documents), 2)
+
+    def test_naive_mode_is_supported(self):
+        client = TestClient(create_app(self.service))
+        self.assertEqual(
+            client.post("/turn", json=self.request("naive")).status_code, 200
+        )
 
     def test_segment_b_is_append_only_and_ordered(self):
         first = TurnRequest.model_validate(self.request(turn=1, text="first"))
@@ -107,6 +120,52 @@ class GatewayTests(unittest.TestCase):
         events = "".join(self.service.run(request))
         metrics_data = events.split("event: metrics\ndata: ", 1)[1].split("\n", 1)[0]
         self.assertEqual(json.loads(metrics_data)["server_ttft_ms"], 25.0)
+
+    def test_radixmind_pins_high_value_and_archives_low_value_context(self):
+        high = TurnRequest.model_validate(
+            self.request(turn=1, text="Follow the documented recovery procedure.")
+        )
+        high.chunk.source_type = "runbook"
+        low = TurnRequest.model_validate(
+            self.request(turn=2, text="2026-08-13T13:01:02Z rid=deadbeef")
+        )
+        low.chunk.source_type = "log_dump"
+        list(self.service.run(high))
+        list(self.service.run(low))
+        self.assertEqual(
+            [item["status"] for item in self.metrics.context_documents],
+            ["pinned", "archived"],
+        )
+        self.assertIn("recovery procedure", self.fireworks.calls[-1]["prompt"])
+        self.assertNotIn("deadbeef", self.fireworks.calls[-1]["prompt"])
+
+    def test_segment_b_budget_archives_oversized_high_value_context(self):
+        request = TurnRequest.model_validate(
+            self.request(text="recovery " * (SEGMENT_B_TOKEN_BUDGET * 2))
+        )
+        request.chunk.source_type = "runbook"
+        list(self.service.run(request))
+        self.assertEqual(self.metrics.context_documents[0]["status"], "archived")
+        self.assertNotIn("recovery recovery", self.fireworks.calls[0]["prompt"])
+
+    def test_naive_prompt_prefix_changes_between_compilations(self):
+        first = TurnRequest.model_validate(self.request(mode="naive", turn=1))
+        second = TurnRequest.model_validate(self.request(mode="naive", turn=2))
+        list(self.service.run(first))
+        list(self.service.run(second))
+        first_prefix = self.fireworks.calls[0]["prompt"].split("SEGMENT C", 1)[0]
+        second_prefix = self.fireworks.calls[1]["prompt"].split("SEGMENT C", 1)[0]
+        self.assertNotEqual(first_prefix, second_prefix)
+        self.assertIn("OBSERVED_AT", second_prefix)
+
+    def test_radixmind_segment_a_b_bytes_remain_a_prefix(self):
+        first = TurnRequest.model_validate(self.request(turn=1, text="first"))
+        second = TurnRequest.model_validate(self.request(turn=2, text="second"))
+        list(self.service.run(first))
+        list(self.service.run(second))
+        first_prefix = self.fireworks.calls[0]["prompt"].split("SEGMENT C", 1)[0]
+        second_prefix = self.fireworks.calls[1]["prompt"].split("SEGMENT C", 1)[0]
+        self.assertTrue(second_prefix.startswith(first_prefix))
 
 
 if __name__ == "__main__":

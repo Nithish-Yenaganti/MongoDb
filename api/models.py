@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 class Mode(str, Enum):
     baseline = "baseline"
+    naive = "naive"
     radixmind = "radixmind"
 
 

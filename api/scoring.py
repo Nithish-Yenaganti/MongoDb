@@ -1,7 +1,5 @@
-"""Context scoring seam owned by Phase 1B."""
+"""Gateway-facing exports for the real context scorer."""
 
+from scorer import PIN_THRESHOLD, score
 
-def score(text: str, source_type: str) -> float:
-    """Return the Phase 1A placeholder score until the real scorer lands."""
-    del text, source_type
-    return 0.5
+__all__ = ["PIN_THRESHOLD", "score"]
